@@ -1,0 +1,23 @@
+services:
+  filebrowser:
+    image: filebrowser/filebrowser
+    user: "1000:1000"
+    container_name: filebrowser
+    networks:
+      - "compose_traefik"
+    volumes:
+      - "${DOCKER_DATA_DIR}/filebrowser/filebrowser.db:/database.db"
+      - "${DOCKER_DATA_DIR}:/srv/"
+    restart: always
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.filebrowser.rule: Host(`${FILEBROWSER_DOMAIN})
+      traefik.http.routers.filebrowser.entrypoints: websecure
+      traefik.http.services.filebrowser.loadbalancer.server.port: 80
+      traefik.http.routers.filebrowser.service: filebrowser
+      traefik.http.routers.filebrowser.tls.certresolver: letsencrypt
+      traefik.http.routers.filebrowser.middlewares: oauth@docker
+
+networks:
+  compose_traefik:
+    external: true

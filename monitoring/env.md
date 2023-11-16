@@ -1,0 +1,5 @@
+```properties
+GF_SECURITY_ADMIN_USER=
+GF_SECURITY_ADMIN_PASSWORD=
+DOCKER_DATA_DIR=/opt/docker/data
+```

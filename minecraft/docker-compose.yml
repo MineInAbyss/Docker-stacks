@@ -1,0 +1,163 @@
+version: '2'
+
+x-labels-backups-env: &default-backups-env
+  RCON_PASSWORD: ${RCON_PASSWORD}
+  BACKUP_METHOD: restic
+  INITIAL_DELAY: 10
+  PRUNE_RESTIC_RETENTION: ${PRUNE_RESTIC_RETENTION}
+
+x-labels-daily-restarts: &daily-restarts
+  ofelia.enabled: "true"
+  ofelia.job-exec.restart.schedule: "0 1 * * *"
+  ofelia.job-exec.restart.command: 'rcon-cli say "Restarting in 60 seconds!"; sleep 50; rcon-cli "say Restarting in 10 seconds!"; sleep 10; rcon-cli restart'
+
+x-service-velocity-defaults: &velocity-network
+  networks:
+    - minecraft
+    - monitoring_monitor
+  restart: unless-stopped
+  tty: true
+  stdin_open: true
+  secrets:
+    - velocity_forwarding_secret
+
+x-environment-minecraft-defaults: &minecraft-env-defaults
+  EULA: "TRUE"
+  TYPE: "PAPER"
+  EXEC_DIRECTLY: "TRUE"
+  USE_AIKAR_FLAGS: "TRUE"
+  ONLINE_MODE: "FALSE"
+  RCON_PASSWORD: ${RCON_PASSWORD}
+
+services:
+
+  velocity:
+    <<: *velocity-network
+    image: ghcr.io/mineinabyss/proxy:master
+    ports:
+      - "25565:25577"
+    volumes:
+      - "${DIR_MINECRAFT}/velocity:/server"
+      - "${DIR_CONFIGS}/velocity:/server-config"
+    environment:
+      SERVER_NAME: "velocity"
+      TYPE: VELOCITY
+      MEMORY: "512m"
+      ANSIBLE_PULL_BRANCH: prod-velocity
+
+  minecraft-build:
+    image: ghcr.io/mineinabyss/minecraft:master
+    <<: *velocity-network
+    environment:
+      <<: *minecraft-env-defaults
+      SERVER_NAME: "build"
+      VERSION: "1.20.1"
+      MEMORY: "6G"
+      ANSIBLE_PULL_BRANCH: build_prod
+      EXTRA_ARGS: '--world-container ./worlds/'
+    volumes:
+      - "${DIR_MINECRAFT}/build:/data"
+      - "${DIR_CONFIGS}/build:/server-config"
+    labels:
+      <<: [*daily-restarts]
+
+  minecraft-survival:
+    image: ghcr.io/mineinabyss/minecraft:master
+    <<: *velocity-network
+    environment:
+      <<: *minecraft-env-defaults
+      SERVER_NAME: "survival"
+      VERSION: "1.19.2"
+      PAPERBUILD: "172"
+      MEMORY: "14G"
+      KEEPUP: "false"
+      ANSIBLE_PULL_BRANCH: master
+      EXTRA_ARGS: '--world-container ./worlds/'
+    volumes:
+      - "${DIR_MINECRAFT}/survival:/data"
+      - "${DIR_CONFIGS}/survival:/server-config"
+    labels:
+      <<: [*daily-restarts]
+
+  minecraft-archive:
+    image: ghcr.io/mineinabyss/minecraft:master
+    cpus: '4.0'
+    <<: *velocity-network
+    environment:
+      <<: *minecraft-env-defaults
+      SERVER_NAME: "archive"
+      EXEC_DIRECTLY: "false"
+      VERSION: "1.20.2"
+      MEMORY: "3G"
+      ENABLE_AUTOPAUSE: "TRUE"
+      OVERRIDE_SERVER_PROPERTIES: "TRUE"
+      MAX_TICK_TIME: "-1"
+      ANSIBLE_PULL_BRANCH: develop
+      UPDATE_DATA_OWNER: "true"
+      JVM_DD_OPTS: "disable.watchdog:true"
+      EXTRA_ARGS: '--world-container ./worlds/'
+    volumes:
+      - "${DIR_MINECRAFT}/archive:/data"
+      - "archive-worlds-overlay:/data/worlds"
+      - "${DIR_CONFIGS}/archive:/server-config"
+
+  backup-build:
+    image: itzg/mc-backup
+    networks:
+      - minecraft
+    environment:
+      <<: *default-backups-env
+      RCON_HOST: minecraft-build
+      RESTIC_PASSWORD: ${RESTIC_PASWORD_BUILD}
+      RESTIC_REPOSITORY: rclone:backup:build
+      BACKUP_NAME: build-worlds
+    volumes:
+      - ${BACKUPS_RCLONE_CONF}:/config/rclone/rclone.conf:ro
+      - ${DIR_MINECRAFT}/build/worlds/world:/data/world:ro
+
+  backup-survival:
+    image: itzg/mc-backup
+    networks:
+      - minecraft
+    environment:
+      <<: *default-backups-env
+      RCON_HOST: minecraft-survival
+      RESTIC_PASSWORD: ${RESTIC_PASWORD_SURVIVAL}
+      RESTIC_REPOSITORY: rclone:backup:survival
+      BACKUP_NAME: survival-worlds
+    volumes:
+      - ${BACKUPS_RCLONE_CONF}:/config/rclone/rclone.conf:ro
+      - ${DIR_MINECRAFT}/survival/worlds/world:/data/world:ro
+
+  mysql:
+    image: mysql
+    networks:
+      - minecraft
+    volumes:
+      - mysql:/var/lib/mysql
+      - /opt/docker/compose/config/schema-migrations/:/docker-entrypoint-initdb.d:ro
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    restart: unless-stopped
+volumes:
+  filebrowser:
+  mysql:
+  # Non-persisting volume for archive worlds (we can delete the overlay any time to revert to the original files)
+  archive-worlds-overlay:
+    driver: local
+    driver_opts:
+      type: overlay
+      o: lowerdir=${DIR_MINECRAFT}/archive-worlds/readonly,upperdir=${DIR_MINECRAFT}/archive-worlds/upper,workdir=${DIR_MINECRAFT}/archive-worlds/work
+      device: overlay
+
+
+networks:
+  minecraft:
+  compose_traefik:
+    external: true
+  monitoring_monitor:
+    external: true
+
+secrets:
+  velocity_forwarding_secret:
+    file: "/opt/docker/compose/secrets/velocity_forwarding_secret"
