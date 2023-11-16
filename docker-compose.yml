@@ -1,0 +1,76 @@
+version: '3'
+
+services:
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    user: "1000:1000"
+    restart: always
+    volumes:
+      - "${DOCKER_DATA_DIR}/grafana/data:/var/lib/grafana"
+      - "${DOCKER_DATA_DIR}/grafana/config/:/etc/grafana"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.grafana.rule: Host(`grafana.internal.mineinabyss.com`)
+      traefik.http.routers.grafana.entrypoints: websecure
+      traefik.http.routers.grafana.tls.certresolver: letsencrypt
+      traefik.http.routers.grafana.service: grafana
+      traefik.http.routers.grafana.middlewares: oauth@docker
+      traefik.http.services.grafana.loadbalancer.server.port: 3000
+    networks: [monitor, compose_traefik]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    volumes:
+      - "/:/rootfs"
+      - "/var/run:/var/run"
+      - "/sys:/sys"
+      - "/var/lib/docker/:/var/lib/docker"
+      - "/dev/disk/:/dev/disk"
+    command:
+      - '--housekeeping_interval=30s'
+      - '--docker_only=true'
+      - '--store_container_labels=false'
+      # - '--disable_metrics=disk,tcp,udp,percpu,sched,process,referenced_memory'
+    privileged: true
+    devices:
+      - "/dev/kmsg"
+    networks: [monitor]
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ${DOCKER_DATA_DIR}/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    networks: [monitor]
+
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+    networks: [monitor]
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  grafana-config:
+
+networks:
+  monitor:
+  compose_traefik:
+    external: true
