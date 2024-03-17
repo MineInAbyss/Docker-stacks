@@ -1,4 +1,7 @@
-# Docker.stacks
+<div align="center">
+
+# Mine in Abyss Docker Stacks
+</div>
 
 Stacks we deploy on our server using docker-compose.
 
